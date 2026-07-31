@@ -1,9 +1,11 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { put } from "@vercel/blob";
 
-// Shared file-upload helper for user-supplied attachments (reimbursement receipts,
-// manual invoice attachments, …). Files land in public/uploads/<subdir>/ and are served
-// statically by Next. Mirrors the Gmail attachment convention in src/lib/gmail.ts.
+// Shared file storage for user-supplied attachments (reimbursement receipts, manual
+// invoice attachments, saved Gmail attachments). Uses Vercel Blob when
+// BLOB_READ_WRITE_TOKEN is set (serverless-safe + persistent — required on Vercel),
+// otherwise the local public/uploads/ disk for dev. Same graceful pattern as notify.ts.
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const ALLOWED = /\.(pdf|png|jpe?g|webp)$/i;
@@ -19,10 +21,43 @@ function isUpload(v: FormDataEntryValue | null): v is File {
   );
 }
 
+function uniqueName(filename: string): string {
+  const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}-${safe}`;
+}
+
 /**
- * Persist an uploaded file under public/uploads/<subdir>/ and return its public URL.
- * Returns null when no file was supplied or the file is rejected (best-effort — never
- * throws, so it won't blow up the surrounding server action). Type/size are validated.
+ * Persist raw bytes under <subdir>/ and return a public URL. Blob when configured, else
+ * local disk. Best-effort — never throws (returns null on failure), so it won't break the
+ * surrounding server action / Gmail scan.
+ */
+export async function saveBuffer(
+  buf: Buffer,
+  filename: string,
+  subdir: string,
+): Promise<string | null> {
+  const safeSub = subdir.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const name = uniqueName(filename);
+  try {
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      const blob = await put(`${safeSub}/${name}`, buf, {
+        access: "public",
+        addRandomSuffix: true,
+      });
+      return blob.url;
+    }
+    const dir = path.join(process.cwd(), "public", "uploads", safeSub);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, name), buf);
+    return `/uploads/${safeSub}/${name}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist an uploaded file (from a server action's FormData). Validates type + size, then
+ * stores via saveBuffer. Returns the public URL, or null when absent/rejected.
  */
 export async function saveUpload(
   entry: FormDataEntryValue | null,
@@ -32,17 +67,6 @@ export async function saveUpload(
   const file = entry;
   if (file.size > MAX_BYTES) return null;
   if (!ALLOWED.test(file.name)) return null;
-
-  try {
-    const buf = Buffer.from(await file.arrayBuffer());
-    const safeSub = subdir.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const dir = path.join(process.cwd(), "public", "uploads", safeSub);
-    await fs.mkdir(dir, { recursive: true });
-    const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const name = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}-${safe}`;
-    await fs.writeFile(path.join(dir, name), buf);
-    return `/uploads/${safeSub}/${name}`;
-  } catch {
-    return null;
-  }
+  const buf = Buffer.from(await file.arrayBuffer());
+  return saveBuffer(buf, file.name, subdir);
 }

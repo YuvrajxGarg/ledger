@@ -3,12 +3,11 @@
 // to a closing sheet, upserts the vendor, validates, and persists an Invoice.
 // Unmatched/ambiguous invoices are stored with closingSheetId=null for producer resolution.
 
-import fs from "node:fs/promises";
-import path from "node:path";
 import type { gmail_v1 } from "googleapis";
 import { db } from "./db";
 import { getGmailClient } from "./google";
 import { logAudit } from "./audit";
+import { saveBuffer } from "./uploads";
 import {
   extractInvoiceFields,
   matchProject,
@@ -118,21 +117,13 @@ async function fetchAttachment(
   }
 }
 
-async function saveAttachmentBuffer(
+function saveAttachmentBuffer(
   messageId: string,
   filename: string,
   buf: Buffer,
 ): Promise<string | null> {
-  try {
-    const dir = path.join(process.cwd(), "public", "uploads", "invoices");
-    await fs.mkdir(dir, { recursive: true });
-    const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const file = `${messageId}-${safe}`;
-    await fs.writeFile(path.join(dir, file), buf);
-    return `/uploads/invoices/${file}`;
-  } catch {
-    return null; // best-effort; never block the scan
-  }
+  // Blob when configured, local disk in dev (see src/lib/uploads.ts). Best-effort.
+  return saveBuffer(buf, `${messageId}-${filename}`, "invoices");
 }
 
 // --- Vendor registry auto-accumulation --------------------------------------
