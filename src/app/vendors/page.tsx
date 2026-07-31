@@ -13,9 +13,9 @@ export default async function VendorsPage({
   const where: Prisma.VendorWhereInput = {};
   if (q) {
     where.OR = [
-      { name: { contains: q } },
-      { category: { contains: q } },
-      { pan: { contains: q } },
+      { name: { contains: q, mode: "insensitive" } },
+      { category: { contains: q, mode: "insensitive" } },
+      { pan: { contains: q, mode: "insensitive" } },
     ];
   }
 

@@ -70,9 +70,9 @@ export default async function InvoicesPage({
   if (amt) where.amount = amt;
   if (q) {
     where.OR = [
-      { vendor: { name: { contains: q } } },
-      { sourceSubject: { contains: q } },
-      { projectName: { contains: q } },
+      { vendor: { name: { contains: q, mode: "insensitive" } } },
+      { sourceSubject: { contains: q, mode: "insensitive" } },
+      { projectName: { contains: q, mode: "insensitive" } },
     ];
   }
 

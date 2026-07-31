@@ -25,8 +25,8 @@ export default async function ClosingSheetsPage({
   if (status) where.status = status;
   if (q) {
     where.OR = [
-      { project: { name: { contains: q } } },
-      { project: { producer: { name: { contains: q } } } },
+      { project: { name: { contains: q, mode: "insensitive" } } },
+      { project: { producer: { name: { contains: q, mode: "insensitive" } } } },
     ];
   }
 

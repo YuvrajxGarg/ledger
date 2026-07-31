@@ -59,8 +59,8 @@ export default async function ReimbursementsPage({
   if (dr) where.date = dr;
   if (q) {
     where.OR = [
-      { projectName: { contains: q } },
-      { description: { contains: q } },
+      { projectName: { contains: q, mode: "insensitive" } },
+      { description: { contains: q, mode: "insensitive" } },
     ];
   }
 
