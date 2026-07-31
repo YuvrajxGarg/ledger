@@ -1,65 +1,123 @@
-import Image from "next/image";
+import Link from "next/link";
+import { Plus, FileText, Clock3, CheckCircle2, IndianRupee } from "lucide-react";
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
+import { formatINR } from "@/lib/money";
+import { sheetTotals } from "@/lib/sheets";
+import { Card, CardBody, PageHeader, ButtonLink, EmptyState } from "@/components/ui";
+import { SheetStatusBadge } from "@/components/status-badge";
 
-export default function Home() {
+export default async function DashboardPage() {
+  const user = await getCurrentUser();
+  const isProducer = user?.role === "PRODUCER";
+
+  const sheets = await db.closingSheet.findMany({
+    where: isProducer ? { project: { producerId: user!.id } } : undefined,
+    include: { project: { include: { producer: true } }, lines: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const withTotals = sheets.map((s) => ({ ...s, totals: sheetTotals(s.lines) }));
+  const pending = withTotals.filter((s) => s.status === "SUBMITTED");
+  const approved = withTotals.filter(
+    (s) => s.status === "APPROVED" || s.status === "DISPATCHED",
+  );
+  const approvedValue = approved.reduce((sum, s) => sum + s.totals.grand, 0);
+
+  const stats = [
+    { label: "Closing sheets", value: String(withTotals.length), icon: FileText, tone: "text-info" },
+    { label: "Pending approval", value: String(pending.length), icon: Clock3, tone: "text-warning" },
+    { label: "Approved", value: String(approved.length), icon: CheckCircle2, tone: "text-success" },
+    { label: "Approved value", value: formatINR(approvedValue), icon: IndianRupee, tone: "text-primary" },
+  ];
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="space-y-8">
+      <PageHeader
+        title={`Welcome, ${user?.name?.split(" ")[0] ?? "there"}`}
+        description="Post-shoot expense management — from invoice to accounts payable."
+        actions={
+          <ButtonLink href="/closing-sheets/new">
+            <Plus size={16} /> New closing sheet
+          </ButtonLink>
+        }
+      />
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {stats.map((s) => {
+          const Icon = s.icon;
+          return (
+            <Card key={s.label}>
+              <CardBody className="pt-5">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">{s.label}</p>
+                  <Icon size={18} className={s.tone} />
+                </div>
+                <p className="mt-2 text-2xl font-semibold tracking-tight">{s.value}</p>
+              </CardBody>
+            </Card>
+          );
+        })}
+      </div>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Recent closing sheets</h2>
+          <Link href="/closing-sheets" className="text-sm text-primary hover:underline">
+            View all
+          </Link>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+
+        {withTotals.length === 0 ? (
+          <EmptyState
+            title="No closing sheets yet"
+            description="Create a closing sheet for a shoot to start the workflow."
+            action={
+              <ButtonLink href="/closing-sheets/new">
+                <Plus size={16} /> New closing sheet
+              </ButtonLink>
+            }
+          />
+        ) : (
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <th className="px-5 py-3 font-medium">Project</th>
+                    <th className="px-5 py-3 font-medium">Producer</th>
+                    <th className="px-5 py-3 font-medium">Status</th>
+                    <th className="px-5 py-3 text-right font-medium">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {withTotals.slice(0, 6).map((s) => (
+                    <tr key={s.id} className="border-b last:border-0 hover:bg-muted/30">
+                      <td className="px-5 py-3">
+                        <Link
+                          href={`/closing-sheets/${s.id}`}
+                          className="font-medium hover:text-primary"
+                        >
+                          {s.project.name}
+                        </Link>
+                      </td>
+                      <td className="px-5 py-3 text-muted-foreground">
+                        {s.project.producer.name}
+                      </td>
+                      <td className="px-5 py-3">
+                        <SheetStatusBadge status={s.status} />
+                      </td>
+                      <td className="px-5 py-3 text-right font-medium tabular-nums">
+                        {formatINR(s.totals.grand)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
+      </section>
     </div>
   );
 }

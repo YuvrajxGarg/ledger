@@ -1,0 +1,186 @@
+// Revolio Accounting Automation — data model.
+// SQLite doesn't support Prisma native enums, so enum-like fields are String;
+// the allowed values live in src/lib/enums.ts and are documented in docs/Data Model.md.
+// Money is stored as INTEGER PAISE everywhere (see docs/Conventions.md).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  role      String // PRODUCER | SENIOR_PRODUCER | ACCOUNTS | ADMIN
+  image     String?
+  createdAt DateTime @default(now())
+
+  // Google OAuth + Gmail (Phase 2). Tokens stored per user to scan their inbox.
+  googleId           String?
+  googleAccessToken  String?
+  googleRefreshToken String?
+  googleTokenExpiry  DateTime?
+  gmailLastScanAt    DateTime?
+
+  projects Project[] @relation("ProducerProjects")
+}
+
+model Project {
+  id           String    @id @default(cuid())
+  name         String
+  canonicalKey String    @unique // slug used to match incoming invoices
+  shootDate    DateTime?
+  finalBudget  Int       @default(0) // paise
+  producerId   String
+  producer     User      @relation("ProducerProjects", fields: [producerId], references: [id])
+  createdAt    DateTime  @default(now())
+
+  closingSheet  ClosingSheet?
+  ledgerEntries LedgerEntry[]
+}
+
+model ClosingSheet {
+  id              String    @id @default(cuid())
+  projectId       String    @unique
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status          String    @default("DRAFT") // DRAFT|SUBMITTED|CHANGES_REQUESTED|APPROVED|REJECTED|DISPATCHED
+  currentRevision Int       @default(1)
+  submittedAt     DateTime?
+  decidedAt       DateTime?
+  decidedById     String?
+  createdAt       DateTime  @default(now())
+
+  lines          ClosingSheetLine[]
+  invoices       Invoice[]
+  reimbursements Reimbursement[]
+}
+
+model ClosingSheetLine {
+  id             String       @id @default(cuid())
+  closingSheetId String
+  closingSheet   ClosingSheet @relation(fields: [closingSheetId], references: [id], onDelete: Cascade)
+  section        String // PRODUCTION | PETTY_CASH
+  name           String
+  particulars    String?
+  amount         Int          @default(0) // paise
+  paidInCash     Boolean      @default(false)
+  advance        Int          @default(0) // paise
+  paymentMode    String? // NEFT | UPI | REIMBURSEMENT | COMPANY_CARD
+  notes          String?
+  cleared        String       @default("NOT_CLEARED") // CLEARED | NOT_CLEARED
+  vendorId       String?
+  vendor         Vendor?      @relation(fields: [vendorId], references: [id])
+  invoiceId      String?
+  createdAt      DateTime     @default(now())
+}
+
+model Vendor {
+  id            String   @id @default(cuid())
+  name          String
+  pan           String?
+  gstin         String?
+  gstApplicable Boolean  @default(true)
+  category      String?
+  bankDetails   String?
+  upiId         String?
+  contact       String?
+  poc           String?
+  createdAt     DateTime @default(now())
+
+  invoices      Invoice[]
+  ledgerEntries LedgerEntry[]
+  lines         ClosingSheetLine[]
+}
+
+model Invoice {
+  id               String        @id @default(cuid())
+  // Optional: unmatched / ambiguous scanned invoices live here until a producer
+  // resolves them to a sheet (Gmail scan → resolution UI).
+  closingSheetId   String?
+  closingSheet     ClosingSheet? @relation(fields: [closingSheetId], references: [id], onDelete: Cascade)
+  vendorId         String?
+  vendor           Vendor?      @relation(fields: [vendorId], references: [id])
+  category         String?
+  projectName      String?
+  shootDate        DateTime?
+  amount           Int          @default(0) // paise
+  gstin            String?
+  gstApplicable    Boolean      @default(true)
+  gstAmount        Int? // paise
+  pan              String?
+  paymentMode      String?
+  upiEligible      Boolean      @default(false)
+  status           String       @default("PENDING") // PENDING|VALIDATED|FLAGGED|AMBIGUOUS
+  validationIssues String? // json array of issue strings
+  isManual         Boolean      @default(false)
+  sourceEmailId    String? // Gmail message id — dedupe key for scans
+  sourceSubject    String? // original email subject (for review / ambiguity)
+  matchConfidence  Int? // 0–100, how confidently matched to its sheet
+  fileUrl          String?
+  createdAt        DateTime     @default(now())
+}
+
+model Reimbursement {
+  id             String       @id @default(cuid())
+  closingSheetId String
+  closingSheet   ClosingSheet @relation(fields: [closingSheetId], references: [id], onDelete: Cascade)
+  producerId     String
+  projectName    String?
+  date           DateTime?
+  description    String?
+  amount         Int          @default(0) // paise
+  paymentMode    String       @default("UPI") // UPI | CASH
+  receiptUrl     String?
+  status         String       @default("SUBMITTED") // SUBMITTED|APPROVED|CHANGES_REQUESTED|REJECTED|PAID
+  decidedById    String?
+  createdAt      DateTime     @default(now())
+}
+
+model LedgerEntry {
+  id        String   @id @default(cuid())
+  vendorId  String
+  vendor    Vendor   @relation(fields: [vendorId], references: [id])
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  type      String // ADVANCE | PARTIAL | FINAL | REIMBURSEMENT
+  amount    Int      @default(0) // paise
+  date      DateTime @default(now())
+  notes     String?
+  createdAt DateTime @default(now())
+}
+
+model Dispatch {
+  id               String   @id @default(cuid())
+  batchType        String // MID_MONTH | MONTH_END
+  triggeredById    String
+  triggeredAt      DateTime @default(now())
+  includedSheetIds String // json array of closingSheet ids
+  notes            String?
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  action     String
+  actorId    String
+  comment    String?
+  createdAt  DateTime @default(now())
+}
+
+model Notification {
+  id                String   @id @default(cuid())
+  type              String
+  recipientEmail    String
+  subject           String
+  body              String
+  relatedEntityType String?
+  relatedEntityId   String?
+  status            String   @default("SENT")
+  sentAt            DateTime @default(now())
+}
