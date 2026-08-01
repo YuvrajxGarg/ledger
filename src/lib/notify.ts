@@ -1,16 +1,14 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { db } from "./db";
+import { getNotifyRecipients } from "./settings";
 
 // Email notification layer. Real SMTP when configured (SMTP_URL or SMTP_HOST/…), otherwise
 // a console preview transport for dev. Either way a Notification row is persisted. Each
 // workflow event calls one helper below (PRODUCT_BRIEF §7). See docs/Features/05 Notifications.md.
 
-function recipients(): string[] {
-  return (process.env.NOTIFY_RECIPIENTS ?? "rishti@revolio.in,yuvraj@revolio.in")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+// Recipients are admin-editable on the Settings page (falls back to NOTIFY_RECIPIENTS,
+// then a hard default). Resolved per-send so a change takes effect without a restart.
+const recipients = getNotifyRecipients;
 
 // undefined = not yet resolved; null = no SMTP configured (use console transport).
 let cachedTransport: Transporter | null | undefined;
@@ -68,7 +66,7 @@ async function notify(params: {
   relatedEntityId?: string;
   to?: string[];
 }) {
-  const to = params.to?.length ? params.to : recipients();
+  const to = params.to?.length ? params.to : await recipients();
   for (const email of to) {
     const ok = await deliver(email, params.subject, params.body);
     await db.notification.create({

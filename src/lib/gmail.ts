@@ -18,6 +18,7 @@ import {
 import { extractPdfText } from "./pdf";
 import { validateInvoice } from "./validation";
 import { notifyInvoiceFlagged, notifyInvoiceAmbiguous } from "./notify";
+import { getGmailScanStrict } from "./settings";
 
 // Likely-invoice messages within the recent window. Tuned to be inclusive; the
 // extractor/validator sort out false positives.
@@ -37,12 +38,6 @@ export type ScanSummary = {
   ignored: number;
 };
 
-// Strict (default): ignore mail that neither matches a shoot nor follows the Revolio
-// convention. Set GMAIL_SCAN_STRICT=false to loosen — every candidate then becomes an
-// AMBIGUOUS invoice for manual matching (the old, noisier behaviour).
-function scanStrict(): boolean {
-  return process.env.GMAIL_SCAN_STRICT !== "false";
-}
 
 type ScanUser = {
   id: string;
@@ -155,6 +150,11 @@ export async function scanInbox(user: ScanUser): Promise<ScanSummary> {
     scanned: 0, created: 0, matched: 0, ambiguous: 0, flagged: 0, duplicates: 0, skipped: 0, ignored: 0,
   };
 
+  // Strict (default): ignore mail that neither matches a shoot nor follows the Revolio
+  // convention. Admin-toggleable on Settings (falls back to GMAIL_SCAN_STRICT). When off,
+  // every candidate becomes an AMBIGUOUS invoice for manual matching (noisier, older behaviour).
+  const strict = await getGmailScanStrict();
+
   const gmail = getGmailClient(user);
   const projects = await db.project.findMany({
     where: { closingSheet: { isNot: null } },
@@ -229,9 +229,9 @@ export async function scanInbox(user: ScanUser): Promise<ScanSummary> {
     if (!project && !followsConvention) {
       // eslint-disable-next-line no-console
       console.log(
-        `[gmail scan] ${scanStrict() ? "ignored" : "kept (loose)"} — no shoot match, non-convention subject: "${subject}"`,
+        `[gmail scan] ${strict ? "ignored" : "kept (loose)"} — no shoot match, non-convention subject: "${subject}"`,
       );
-      if (scanStrict()) {
+      if (strict) {
         summary.ignored++;
         continue;
       }
